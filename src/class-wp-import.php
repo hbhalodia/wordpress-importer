@@ -1168,38 +1168,15 @@ class WP_Import extends WP_Importer {
 		$content = $post->post_content;
 		$updated = false;
 
-		// Pattern to match Gutenberg block comments with noteId in metadata.
-		// Example: <!-- wp:heading {"level":1,"metadata":{"noteId":3252}} -->
-		preg_match_all(
-			'/<!--\s+wp:([a-z0-9\/-]+)\s+(\{[^}]*"metadata"\s*:\s*\{[^}]*"noteId"\s*:\s*(\d+)[^}]*\}[^}]*\})\s+-->/i',
-			$content,
-			$matches,
-			PREG_SET_ORDER | PREG_OFFSET_CAPTURE
-		);
+		foreach ( $this->processed_comments as $old_note_id => $new_note_id ) {
+			$search  = '"noteId":' . $old_note_id;
+			$replace = '"noteId":' . $new_note_id;
 
-		if ( empty( $matches ) ) {
-			return;
-		}
+			$new_content = str_replace( $search, $replace, $content );
 
-		foreach ( $matches as $match ) {
-			$full_match  = $match[0][0];
-			$block_name  = $match[1][0];
-			$attributes  = $match[2][0];
-			$old_note_id = (int) $match[3][0];
-			$offset      = $match[0][1];
-
-			// Check if we have a mapping for this comment ID.
-			if ( isset( $this->processed_comments[ $old_note_id ] ) ) {
-				$new_note_id    = $this->processed_comments[ $old_note_id ];
-				$new_attributes = preg_replace(
-					'/"noteId"\s*:\s*' . $old_note_id . '\b/',
-					'"noteId":' . $new_note_id,
-					$attributes
-				);
-
-				$new_match = '<!-- wp:' . $block_name . ' ' . $new_attributes . ' -->';
-				$content   = substr_replace( $content, $new_match, $offset, strlen( $full_match ) );
-				$updated   = true;
+			if ( $new_content !== $content ) {
+				$content = $new_content;
+				$updated = true;
 			}
 		}
 
