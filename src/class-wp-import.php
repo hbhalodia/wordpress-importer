@@ -1160,35 +1160,66 @@ class WP_Import extends WP_Importer {
 			return;
 		}
 
+		if ( ! class_exists( 'WP_Block_Processor' ) ) {
+			return;
+		}
+
 		$post = get_post( $post_id );
 
 		if ( ! $post ) {
 			return;
 		}
 
-		$content = $post->post_content;
+		$new_content     = '';
+		$has_updates     = false;
+		$block_processor = new WP_Block_Processor( $post->post_content );
+
+		while ( $block_processor->next_block() ) {
+			$block = $block_processor->extract_full_block_and_advance();
+
+			if ( $this->update_note_ids_in_block_tree( $block ) ) {
+				$has_updates = true;
+			}
+
+			$new_content .= serialize_block( $block );
+		}
+
+		if ( $has_updates ) {
+			wp_update_post(
+				array(
+					'ID'           => $post_id,
+					'post_content' => $new_content,
+				)
+			);
+		}
+	}
+
+	/**
+	 * Recursively updates noteId references in a block tree.
+	 *
+	 * @param array $block A single block from the parsed block tree.
+	 * @return bool Whether any block was updated.
+	 */
+	private function update_note_ids_in_block_tree( array &$block ) {
 		$updated = false;
 
-		foreach ( $this->processed_comments as $old_note_id => $new_note_id ) {
-			$search  = '"noteId":' . $old_note_id;
-			$replace = '"noteId":' . $new_note_id;
-
-			$new_content = str_replace( $search, $replace, $content );
-
-			if ( $new_content !== $content ) {
-				$content = $new_content;
+		if ( isset( $block['attrs']['metadata']['noteId'] ) ) {
+			$old_note_id = $block['attrs']['metadata']['noteId'];
+			if ( isset( $this->processed_comments[ $old_note_id ] ) ) {
+				$block['attrs']['metadata']['noteId'] = $this->processed_comments[ $old_note_id ];
 				$updated = true;
 			}
 		}
 
-		if ( $updated ) {
-			wp_update_post(
-				array(
-					'ID'           => $post_id,
-					'post_content' => $content,
-				)
-			);
+		if ( ! empty( $block['innerBlocks'] ) ) {
+			foreach ( $block['innerBlocks'] as &$inner_block ) {
+				if ( $this->update_note_ids_in_block_tree( $inner_block ) ) {
+					$updated = true;
+				}
+			}
 		}
+
+		return $updated;
 	}
 
 	/**
