@@ -33,6 +33,7 @@ class WP_Import extends WP_Importer {
 	public $author_mapping       = array();
 	public $processed_terms      = array();
 	public $processed_posts      = array();
+	public $processed_comments   = array();
 	public $post_orphans         = array();
 	public $processed_menu_items = array();
 	public $menu_item_orphans    = array();
@@ -818,6 +819,7 @@ class WP_Import extends WP_Importer {
 			if ( ! empty( $post['comments'] ) ) {
 				$this->process_post_comments( $post['comments'], (bool) $post_exists, $comment_post_id, $post );
 				unset( $post['comments'] );
+				$this->update_block_note_ids( $post_id );
 			}
 
 			if ( ! isset( $post['postmeta'] ) ) {
@@ -1095,6 +1097,10 @@ class WP_Import extends WP_Importer {
 				do_action( 'wp_import_insert_comment', $inserted_comment_id, $comment, $comment_post_id, $post );
 				$this->process_post_comment_metas( $inserted_comment_id, $comment['commentmeta'] );
 				$inserted_comments[ $key ] = $inserted_comment_id;
+				// Store comment ID mapping for note-type comments to update noteId references in blocks.
+				if ( isset( $comment['comment_type'] ) && 'note' === $comment['comment_type'] ) {
+					$this->processed_comments[ $key ] = $inserted_comment_id;
+				}
 				++$num_comments;
 			}
 		}
@@ -1136,6 +1142,74 @@ class WP_Import extends WP_Importer {
 
 		foreach ( $commentmeta as $meta ) {
 			$this->process_post_comment_meta( $comment_id, $meta );
+		}
+	}
+
+	/**
+	 * Update noteId references in block metadata to reflect new note-type comment IDs.
+	 *
+	 * Scans post content for Gutenberg blocks with noteId in metadata and updates
+	 * them to match the new comment IDs assigned during import. Only processes
+	 * comments with type 'note'.
+	 *
+	 * @param int $post_id The ID of the post being processed.
+	 */
+	protected function update_block_note_ids( $post_id ) {
+		if ( empty( $this->processed_comments ) ) {
+			return;
+		}
+
+		$post = get_post( $post_id );
+
+		if ( ! $post ) {
+			return;
+		}
+
+		$content = $post->post_content;
+		$updated = false;
+
+		// Pattern to match Gutenberg block comments with noteId in metadata.
+		// Example: <!-- wp:heading {"level":1,"metadata":{"noteId":3252}} -->
+		preg_match_all(
+			'/<!--\s+wp:([a-z0-9\/-]+)\s+(\{[^}]*"metadata"\s*:\s*\{[^}]*"noteId"\s*:\s*(\d+)[^}]*\}[^}]*\})\s+-->/i',
+			$content,
+			$matches,
+			PREG_SET_ORDER | PREG_OFFSET_CAPTURE
+		);
+
+		if ( empty( $matches ) ) {
+			return;
+		}
+
+		foreach ( $matches as $match ) {
+			$full_match  = $match[0][0];
+			$block_name  = $match[1][0];
+			$attributes  = $match[2][0];
+			$old_note_id = (int) $match[3][0];
+			$offset      = $match[0][1];
+
+			// Check if we have a mapping for this comment ID.
+			if ( isset( $this->processed_comments[ $old_note_id ] ) ) {
+				$new_note_id    = $this->processed_comments[ $old_note_id ];
+				$new_attributes = preg_replace(
+					'/"noteId"\s*:\s*' . $old_note_id . '\b/',
+					'"noteId":' . $new_note_id,
+					$attributes
+				);
+
+				$new_match = '<!-- wp:' . $block_name . ' ' . $new_attributes . ' -->';
+				$content   = substr_replace( $content, $new_match, $offset, strlen( $full_match ) );
+				$updated   = true;
+			}
+		}
+
+		if ( $updated ) {
+			wp_update_post(
+				array(
+					'ID'           => $post_id,
+					'post_content' => $content,
+				)
+			);
 		}
 	}
 
