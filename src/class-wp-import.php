@@ -1153,8 +1153,9 @@ class WP_Import extends WP_Importer {
 	 * comments with type 'note'.
 	 *
 	 * @param int $post_id The ID of the post being processed.
+	 * @return void
 	 */
-	protected function update_block_note_ids( $post_id ) {
+	protected function update_block_note_ids( int $post_id = 0 ): void {
 		if ( empty( $this->processed_comments ) ) {
 			return;
 		}
