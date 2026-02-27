@@ -1146,13 +1146,23 @@ class WP_Import extends WP_Importer {
 	}
 
 	/**
-	 * Update noteId references in block metadata to reflect new note-type comment IDs.
+	 * Remaps noteId references in block metadata after note-type comments are imported.
 	 *
-	 * Scans post content for Gutenberg blocks with noteId in metadata and updates
-	 * them to match the new comment IDs assigned during import. Only processes
-	 * comments with type 'note'.
+	 * During import, note-type comments receive new auto-incremented IDs on the destination
+	 * site. Block metadata may reference those comment IDs via a `noteId` attribute, e.g.:
 	 *
-	 * @param int $post_id The ID of the post being processed.
+	 *   <!-- wp:heading {"metadata":{"noteId":3252}} -->
+	 *
+	 * This method uses WP_Block_Processor to walk every block opener in the post content,
+	 * checks whether its `metadata.noteId` matches an old comment ID recorded in
+	 * `$this->processed_comments`, and — if so — replaces it with the new ID. Updated
+	 * blocks are collected as WP_HTML_Text_Replacement objects and applied back to the
+	 * raw post content in one pass before saving.
+	 *
+	 * Skips the post entirely when no `"noteId"` string is present in the content, or
+	 * when WP_Block_Processor is unavailable.
+	 *
+	 * @param int $post_id ID of the post whose block content should be updated.
 	 * @return void
 	 */
 	protected function update_block_note_ids( int $post_id = 0 ): void {
@@ -1165,61 +1175,64 @@ class WP_Import extends WP_Importer {
 		}
 
 		$post = get_post( $post_id );
-
 		if ( ! $post ) {
 			return;
 		}
 
-		$new_content     = '';
-		$has_updates     = false;
+		$next_note_id_at = strpos( $post->post_content, '"noteId"' );
+		if ( false === $next_note_id_at ) {
+			return;
+		}
+
+		$replacements    = array();
 		$block_processor = new WP_Block_Processor( $post->post_content );
 
 		while ( $block_processor->next_block() ) {
-			$block = $block_processor->extract_full_block_and_advance();
+			$span = $block_processor->get_span();
 
-			if ( $this->update_note_ids_in_block_tree( $block ) ) {
-				$has_updates = true;
+			if ( $next_note_id_at > ( $span->start + $span->length ) ) {
+				continue;
 			}
 
-			$new_content .= serialize_block( $block );
-		}
+			$next_note_id_at = strpos( $post->post_content, '"noteId"', $next_note_id_at + 1 );
+			$attributes      = $block_processor->allocate_and_return_parsed_attributes();
+			$old_note_id     = $attributes['metadata']['noteId'] ?? null;
 
-		if ( $has_updates ) {
-			wp_update_post(
-				array(
-					'ID'           => $post_id,
-					'post_content' => $new_content,
-				)
+			if (
+				! ( is_string( $old_note_id ) || is_int( $old_note_id ) ) ||
+				! isset( $this->processed_comments[ $old_note_id ] )
+			) {
+				continue;
+			}
+
+			$attributes['metadata']['noteId'] = $this->processed_comments[ $old_note_id ];
+			$json_string                      = wp_json_encode( $attributes );
+			$void                             = 'void' === $block_processor->get_delimiter_type() ? '/' : '';
+
+			$replacements[] = new WP_HTML_Text_Replacement(
+				$span->start,
+				$span->length,
+				"<!-- wp:{$block_processor->get_block_type()} {$json_string} {$void}-->"
 			);
 		}
-	}
 
-	/**
-	 * Recursively updates noteId references in a block tree.
-	 *
-	 * @param array $block A single block from the parsed block tree.
-	 * @return bool Whether any block was updated.
-	 */
-	private function update_note_ids_in_block_tree( array &$block ) {
-		$updated = false;
-
-		if ( isset( $block['attrs']['metadata']['noteId'] ) ) {
-			$old_note_id = $block['attrs']['metadata']['noteId'];
-			if ( isset( $this->processed_comments[ $old_note_id ] ) ) {
-				$block['attrs']['metadata']['noteId'] = $this->processed_comments[ $old_note_id ];
-				$updated = true;
-			}
+		if ( empty( $replacements ) ) {
+			return;
 		}
 
-		if ( ! empty( $block['innerBlocks'] ) ) {
-			foreach ( $block['innerBlocks'] as &$inner_block ) {
-				if ( $this->update_note_ids_in_block_tree( $inner_block ) ) {
-					$updated = true;
-				}
+		$stitcher_class = new class ( $post->post_content ) extends WP_HTML_Tag_Processor {
+			public function stitch( $updates ) {
+				$this->lexical_updates = $updates;
+				return $this->get_updated_html();
 			}
-		}
+		};
 
-		return $updated;
+		wp_update_post(
+			array(
+				'ID'           => $post_id,
+				'post_content' => $stitcher_class->stitch( $replacements )
+			)
+		);
 	}
 
 	/**
