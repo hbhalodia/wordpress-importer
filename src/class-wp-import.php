@@ -1148,20 +1148,6 @@ class WP_Import extends WP_Importer {
 	/**
 	 * Remaps noteId references in block metadata after note-type comments are imported.
 	 *
-	 * During import, note-type comments receive new auto-incremented IDs on the destination
-	 * site. Block metadata may reference those comment IDs via a `noteId` attribute, e.g.:
-	 *
-	 *   <!-- wp:heading {"metadata":{"noteId":3252}} -->
-	 *
-	 * This method uses WP_Block_Processor to walk every block opener in the post content,
-	 * checks whether its `metadata.noteId` matches an old comment ID recorded in
-	 * `$this->processed_comments`, and — if so — replaces it with the new ID. Updated
-	 * blocks are collected as WP_HTML_Text_Replacement objects and applied back to the
-	 * raw post content in one pass before saving.
-	 *
-	 * Skips the post entirely when no `"noteId"` string is present in the content, or
-	 * when WP_Block_Processor is unavailable.
-	 *
 	 * @param int $post_id ID of the post whose block content should be updated.
 	 * @return void
 	 */
