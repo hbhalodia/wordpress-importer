@@ -1166,7 +1166,6 @@ class WP_Import extends WP_Importer {
 			return;
 		}
 
-
 		// @todo Replace with WP_HTML_Tag_Processor or WP_Block_Processor once minimum version support is 6.2 or 6.9 respectively.
 		$parser           = new WP_Block_Parser();
 		$parser->document = $post->post_content;
