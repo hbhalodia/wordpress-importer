@@ -1156,33 +1156,38 @@ class WP_Import extends WP_Importer {
 			return;
 		}
 
-		if ( ! class_exists( 'WP_Block_Processor' ) ) {
-			return;
-		}
-
 		$post = get_post( $post_id );
 		if ( ! $post ) {
 			return;
 		}
 
-		$next_note_id_at = strpos( $post->post_content, '"noteId"' );
-		if ( false === $next_note_id_at ) {
+		$is_contain_notes = strpos( $post->post_content, '"noteId"' );
+		if ( false === $is_contain_notes ) {
 			return;
 		}
 
-		$replacements    = array();
-		$block_processor = new WP_Block_Processor( $post->post_content );
 
-		while ( $block_processor->next_block() ) {
-			$span = $block_processor->get_span();
+		// @todo Replace with WP_HTML_Tag_Processor or WP_Block_Processor once minimum version support is 6.2 or 6.9 respectively.
+		$parser           = new WP_Block_Parser();
+		$parser->document = $post->post_content;
+		$parser->offset   = 0;
+		$replacements     = array();
 
-			if ( $next_note_id_at > ( $span->start + $span->length ) ) {
+		do {
+			$next_token = $parser->next_token();
+			list( $token_type, $block_name, $attrs, $start_offset, $token_length ) = $next_token;
+
+			if ( 'no-more-tokens' === $token_type ) {
+				break;
+			}
+
+			$parser->offset = $start_offset + $token_length;
+
+			if ( 'block-opener' !== $token_type && 'void-block' !== $token_type ) {
 				continue;
 			}
 
-			$next_note_id_at = strpos( $post->post_content, '"noteId"', $next_note_id_at + 1 );
-			$attributes      = $block_processor->allocate_and_return_parsed_attributes();
-			$old_note_id     = $attributes['metadata']['noteId'] ?? null;
+			$old_note_id = $attrs['metadata']['noteId'] ?? null;
 
 			if (
 				! ( is_string( $old_note_id ) || is_int( $old_note_id ) ) ||
@@ -1191,32 +1196,41 @@ class WP_Import extends WP_Importer {
 				continue;
 			}
 
-			$attributes['metadata']['noteId'] = $this->processed_comments[ $old_note_id ];
-			$json_string                      = wp_json_encode( $attributes );
-			$void                             = 'void' === $block_processor->get_delimiter_type() ? '/' : '';
+			$attribute_string     = substr( $post->post_content, $start_offset, $token_length );
+			$attribute_json_start = strcspn( $attribute_string, '{' );
+			$attribute_json_end   = strrpos( $attribute_string, '}' );
 
-			$replacements[] = new WP_HTML_Text_Replacement(
-				$span->start,
-				$span->length,
-				"<!-- wp:{$block_processor->get_block_type()} {$json_string} {$void}-->"
-			);
-		}
+			if ( false === $attribute_json_end || $attribute_json_start >= $attribute_json_end ) {
+				continue;
+			}
+
+			$json_start  = $start_offset + $attribute_json_start;
+			$json_length = $attribute_json_end - $attribute_json_start + 1;
+
+			$attrs['metadata']['noteId'] = $this->processed_comments[ $old_note_id ];
+			$replacements[]              = array( $json_start, $json_length, serialize_block_attributes( $attrs ) );
+
+		} while ( 'no-more-tokens' !== $token_type );
 
 		if ( empty( $replacements ) ) {
 			return;
 		}
 
-		$stitcher_class = new class ( $post->post_content ) extends WP_HTML_Tag_Processor {
-			public function stitch( $updates ) {
-				$this->lexical_updates = $updates;
-				return $this->get_updated_html();
-			}
-		};
+		// Apply replacements in reverse order to avoid affecting offsets of later replacements.
+		$replacements     = array_reverse( $replacements );
+		$updated_content  = $post->post_content;
+
+		// Loop through each replacement and update the content string with the new JSON attributes.
+		foreach ( $replacements as $replacement ) {
+			list( $offset, $length, $new_json ) = $replacement;
+			$updated_content = substr_replace( $updated_content, $new_json, $offset, $length );
+		}
 
 		wp_update_post(
-			array(
+			// Cast to object to ensure wp_update_post() will add the required slashes.
+			(object) array(
 				'ID'           => $post_id,
-				'post_content' => $stitcher_class->stitch( $replacements )
+				'post_content' => $updated_content,
 			)
 		);
 	}
