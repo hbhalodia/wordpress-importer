@@ -1170,9 +1170,10 @@ class WP_Import extends WP_Importer {
 		$parser           = new WP_Block_Parser();
 		$parser->document = $post->post_content;
 		$parser->offset   = 0;
+		$end              = strlen( $post->post_content );
 		$replacements     = array();
 
-		do {
+		while ( $parser->offset < $end ) {
 			$next_token = $parser->next_token();
 			list( $token_type, $block_name, $attrs, $start_offset, $token_length ) = $next_token;
 
@@ -1208,22 +1209,25 @@ class WP_Import extends WP_Importer {
 
 			$attrs['metadata']['noteId'] = $this->processed_comments[ $old_note_id ];
 			$replacements[]              = array( $json_start, $json_length, serialize_block_attributes( $attrs ) );
-
-		} while ( 'no-more-tokens' !== $token_type );
+		}
 
 		if ( empty( $replacements ) ) {
 			return;
 		}
 
-		// Apply replacements in reverse order to avoid affecting offsets of later replacements.
-		$replacements     = array_reverse( $replacements );
-		$updated_content  = $post->post_content;
+		$post_content    = $post->post_content;
+		$updated_content = '';
+		$was_at          = 0;
 
-		// Loop through each replacement and update the content string with the new JSON attributes.
 		foreach ( $replacements as $replacement ) {
 			list( $offset, $length, $new_json ) = $replacement;
-			$updated_content = substr_replace( $updated_content, $new_json, $offset, $length );
+
+			$pre_length       = $offset - $was_at;
+			$updated_content .= substr( $post_content, $was_at, $pre_length ) . $new_json;
+			$was_at           = $offset + $length;
 		}
+
+		$updated_content .= substr( $post_content, $was_at );
 
 		wp_update_post(
 			// Cast to object to ensure wp_update_post() will add the required slashes.
