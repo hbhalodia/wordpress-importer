@@ -1161,8 +1161,7 @@ class WP_Import extends WP_Importer {
 			return;
 		}
 
-		$is_contain_notes = strpos( $post->post_content, '"noteId"' );
-		if ( false === $is_contain_notes ) {
+		if ( ! str_contains( $post->post_content, '"noteId"' ) ) {
 			return;
 		}
 
@@ -1200,7 +1199,7 @@ class WP_Import extends WP_Importer {
 			$attribute_json_start = strcspn( $attribute_string, '{' );
 			$attribute_json_end   = strrpos( $attribute_string, '}' );
 
-			if ( false === $attribute_json_end || $attribute_json_start >= $attribute_json_end ) {
+			if ( false === $attribute_json_start || false === $attribute_json_end || $attribute_json_start >= $attribute_json_end ) {
 				continue;
 			}
 
