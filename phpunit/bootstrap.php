@@ -42,5 +42,13 @@ tests_add_filter( 'plugins_loaded', '_manually_load_importer' );
 // Include the PHPUnit Polyfills autoloader.
 require dirname( __DIR__ ) . '/vendor/yoast/phpunit-polyfills/phpunitpolyfills-autoload.php';
 
+// Patch old WP test suites (< 5.9) that reject PHPUnit 8+.
+// The version check lives in the test suite's bootstrap. If it only allows up to
+// PHPUnit 7.x, we override it by defining WP_TESTS_PHPUNIT_POLYFILLS_PATH so the
+// WP test suite knows polyfills are available and skips its hard version gate.
+if ( ! defined( 'WP_TESTS_PHPUNIT_POLYFILLS_PATH' ) ) {
+	define( 'WP_TESTS_PHPUNIT_POLYFILLS_PATH', dirname( __DIR__ ) . '/vendor/yoast/phpunit-polyfills/' );
+}
+
 // Start up the WP testing environment.
 require $_tests_dir . '/includes/bootstrap.php';
