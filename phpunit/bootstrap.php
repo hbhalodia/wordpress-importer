@@ -43,11 +43,20 @@ tests_add_filter( 'plugins_loaded', '_manually_load_importer' );
 require dirname( __DIR__ ) . '/vendor/yoast/phpunit-polyfills/phpunitpolyfills-autoload.php';
 
 // Patch old WP test suites (< 5.9) that reject PHPUnit 8+.
-// The version check lives in the test suite's bootstrap. If it only allows up to
-// PHPUnit 7.x, we override it by defining WP_TESTS_PHPUNIT_POLYFILLS_PATH so the
-// WP test suite knows polyfills are available and skips its hard version gate.
+// WP 5.9+ checks WP_TESTS_PHPUNIT_POLYFILLS_PATH and skips the version gate.
 if ( ! defined( 'WP_TESTS_PHPUNIT_POLYFILLS_PATH' ) ) {
 	define( 'WP_TESTS_PHPUNIT_POLYFILLS_PATH', dirname( __DIR__ ) . '/vendor/yoast/phpunit-polyfills/' );
+}
+
+// For WP < 5.9 test suites: the compat.php file has a hard version check that
+// rejects PHPUnit 8+ and doesn't know about WP_TESTS_PHPUNIT_POLYFILLS_PATH.
+// Replace it with a no-op so the polyfills can handle compatibility instead.
+$_compat_file = $_tests_dir . '/includes/phpunit6/compat.php';
+if ( file_exists( $_compat_file ) ) {
+	$_compat_contents = file_get_contents( $_compat_file );
+	if ( false === strpos( $_compat_contents, 'WP_TESTS_PHPUNIT_POLYFILLS_PATH' ) ) {
+		file_put_contents( $_compat_file, "<?php\n// Patched by wordpress-importer to allow PHPUnit 8+/9+ with Yoast polyfills.\n" );
+	}
 }
 
 // Start up the WP testing environment.
