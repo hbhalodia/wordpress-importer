@@ -48,15 +48,25 @@ if ( ! defined( 'WP_TESTS_PHPUNIT_POLYFILLS_PATH' ) ) {
 	define( 'WP_TESTS_PHPUNIT_POLYFILLS_PATH', dirname( __DIR__ ) . '/vendor/yoast/phpunit-polyfills/' );
 }
 
-// For WP < 5.9 test suites: the compat.php file has a hard version check that
-// rejects PHPUnit 8+ and doesn't know about WP_TESTS_PHPUNIT_POLYFILLS_PATH.
-// Replace it with a no-op so the polyfills can handle compatibility instead.
+// For WP < 5.9 test suites: the compat.php has a hard PHPUnit version gate
+// that calls exit(1) for PHPUnit 8+. Comment out exit() calls to let the
+// Yoast polyfills handle compatibility, while preserving any compat shims.
 $_compat_file = $_tests_dir . '/includes/phpunit6/compat.php';
 if ( file_exists( $_compat_file ) ) {
 	$_compat_contents = file_get_contents( $_compat_file );
-	if ( false === strpos( $_compat_contents, 'WP_TESTS_PHPUNIT_POLYFILLS_PATH' ) ) {
-		file_put_contents( $_compat_file, "<?php\n// Patched by wordpress-importer to allow PHPUnit 8+/9+ with Yoast polyfills.\n" );
+	if ( false === strpos( $_compat_contents, 'WP_TESTS_PHPUNIT_POLYFILLS_PATH' ) && false !== strpos( $_compat_contents, 'exit' ) ) {
+		$_compat_contents = str_replace( 'exit( 1 );', '// exit( 1 );', $_compat_contents );
+		$_compat_contents = str_replace( 'exit(1);', '// exit(1);', $_compat_contents );
+		file_put_contents( $_compat_file, $_compat_contents );
 	}
+}
+
+// Provide a stub for PHPUnit\Util\Getopt which was removed in PHPUnit 9.x
+// but referenced by old WP test suite compat files.
+if ( ! class_exists( 'PHPUnit\Util\Getopt' ) ) {
+	// phpcs:ignore Generic.Files.OneObjectStructurePerFile.MultipleFound
+	class PHPUnit_Util_Getopt_Stub {}
+	class_alias( 'PHPUnit_Util_Getopt_Stub', 'PHPUnit\Util\Getopt' );
 }
 
 // Start up the WP testing environment.
