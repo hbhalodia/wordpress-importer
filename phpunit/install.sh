@@ -32,26 +32,25 @@ fi
 set -ex
 
 install_wp_and_test_suite() {
-  mkdir git-clone
-
 	# setup up WordPress
 	if [ ! -d $WP_CORE_DIR ]; then
 		mkdir -p $WP_CORE_DIR
-		checkout_wordpress_develop
+		checkout_wordpress_develop "$WP_TESTS_TAG"
 		mv git-clone/src/* $WP_CORE_DIR
 	fi
 
 	# set up testing suite if it doesn't yet exist
+	# Always use trunk to ensure the test suite supports PHPUnit 8+ via the Yoast PHPUnit Polyfills.
 	if [ ! -d $WP_TESTS_DIR ]; then
 		# set up testing suite
 		mkdir -p $WP_TESTS_DIR
-		checkout_wordpress_develop
+		checkout_wordpress_develop "trunk"
 		mv git-clone/tests/phpunit/includes $WP_TESTS_DIR/includes
 		mv git-clone/tests/phpunit/data $WP_TESTS_DIR/data
 	fi
 
 	if [ ! -f wp-tests-config.php ]; then
-		checkout_wordpress_develop
+		checkout_wordpress_develop "trunk"
 		mv git-clone/wp-tests-config-sample.php $WP_TESTS_DIR/wp-tests-config.php
 		# remove all forward slashes in the end
 		WP_CORE_DIR=$(echo $WP_CORE_DIR | sed "s:/\+$::")
@@ -87,9 +86,9 @@ install_db() {
 }
 
 checkout_wordpress_develop() {
-  if [ ! -d "git-clone/.git" ]; then
-    git clone --depth=1 --branch "${WP_TESTS_TAG}" https://github.com/WordPress/wordpress-develop.git git-clone
-  fi
+  local BRANCH="${1:-$WP_TESTS_TAG}"
+  rm -rf git-clone
+  git clone --depth=1 --branch "${BRANCH}" https://github.com/WordPress/wordpress-develop.git git-clone
 }
 
 install_wp_and_test_suite
